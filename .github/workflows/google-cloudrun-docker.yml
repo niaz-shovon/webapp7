@@ -1,0 +1,86 @@
+name: Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  DOCKER_IMAGE: webapp7
+  PROJECT_ID: serverless-411207
+  REGION: asia-southeast1
+  REPOSITORY_ID: bdj-serverless-ci-cd-docker-repo
+  GCP_SA_KEY: ${{ secrets.SERVERLESS_411207_C41760532440 }}
+
+jobs:
+  build-tag-push-deploy:
+    name: Build, tag, push Docker image and deploy to Cloud Run
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      # Continuous Integration
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        id: prep
+        run: |
+          VERSION="${{ github.run_number }}"
+          REGISTRY="${REGION}-docker.pkg.dev"
+          REPOSITORY="${REGISTRY}/${PROJECT_ID}/${REPOSITORY_ID}"
+          TAGS="${REPOSITORY}/${DOCKER_IMAGE}:${VERSION}"
+          echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.prep.outputs.registry }}
+          username: _json_key
+          password: ${{ env.GCP_SA_KEY }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ steps.prep.outputs.tags }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.prep.outputs.created }}
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.version=${{ steps.prep.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=${{ github.event.repository.license.name }}         
+
+      # Continuous Deployment
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ env.GCP_SA_KEY }}
+          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: '${{ env.PROJECT_ID }}'
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.DOCKER_IMAGE }}
+          region: ${{ env.REGION }}
+          flags: --allow-unauthenticated --vpc-connector=projects/serverless-411207/locations/asia-southeast1/connectors/bdjserverlessvpcconnector --vpc-egress=all-traffic --set-env-vars=ASP_NET_CORE=development
+          # NOTE: If using a pre-built image, update the image name here
+          image: ${{ steps.prep.outputs.tags }}
+
+      # Cloud Run URL output
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}
