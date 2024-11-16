@@ -11,7 +11,7 @@ EXPOSE 8080
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["./WebApplication7.csproj", "WebApplication7/"]
+COPY ["WebApplication7/WebApplication7.csproj", "WebApplication7/"]
 RUN dotnet restore "./WebApplication7/WebApplication7.csproj"
 COPY . .
 WORKDIR "/src/WebApplication7"
